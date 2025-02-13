@@ -1,0 +1,73 @@
+name: Summarize PR Diff
+
+on:
+  pull_request:
+    branches-ignore:
+      - production
+    types: [opened, synchronize]
+
+permissions:
+  actions: write     
+  checks: write       
+  pull-requests: write 
+  contents: read
+  packages: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v3
+        with: 
+          token: ${{ secrets.MY_GITHUB_TOKEN }}
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'  
+
+      - name: Set up environment variables
+        run: |
+          echo "MY_GITHUB_TOKEN=${{ secrets.MY_GITHUB_TOKEN }}" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Verify Token Access
+        run: |
+          echo "Checking if MY_GITHUB_TOKEN is set..."
+          if [[ -z "${MY_GITHUB_TOKEN}" ]]; then
+            echo "MY_GITHUB_TOKEN is NOT set!"
+            exit 1  # Exit if the token is not available
+          else
+            echo "MY_GITHUB_TOKEN is successfully set!"
+          fi
+          # Make a test request to verify the token works (fetch user info from GitHub)
+          node -e "
+            const axios = require('axios');
+            const { MY_GITHUB_TOKEN } = process.env;  // Access token from environment
+            const githubApi = axios.create({
+              baseURL: 'https://api.github.com',
+              headers: { Authorization: \`Bearer \${MY_GITHUB_TOKEN}\` }
+            });
+            
+            async function testToken() {
+              try {
+                const response = await githubApi.get('/user');
+                console.log('Token is valid. User Info:', response.data);
+              } catch (error) {
+                console.error('Error verifying token:', error.response?.data || error.message);
+                process.exit(1);  // Exit if the token is invalid
+              }
+            }
+            testToken();
+          "
+
+      - name: Run Summarize PR Diff Script
+        env:
+          MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}  
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }} 
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node post-pr-summary.js
